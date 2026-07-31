@@ -1,36 +1,70 @@
 import React, { useState } from 'react';
-import { Mail, Lock, ArrowRight, Shield, Globe, CreditCard, Sparkles, Send } from 'lucide-react';
+import { Mail, Lock, ArrowRight, Shield, Globe, CreditCard, Send } from 'lucide-react';
+import { API_BASE_URL } from '@/src/config/api';
 
 interface LoginPageProps {
-  onLogin: () => void;
+  onLogin: (accessToken?: string, user?: { id: string; fullName: string; email: string; role: string }) => void;
   onNavigateToSignup: () => void;
 }
 
 export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignup }) => {
-  const [email, setEmail] = useState('alex.morgan@wextransfer.com');
-  const [password, setPassword] = useState('••••••••••••');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
+    setError(null);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      let data: any;
+      try {
+        data = await response.json();
+      } catch (jsonParseError) {
+        throw new Error('The server returned an invalid response. Please verify the backend is active.');
+      }
+
+      if (!response.ok || !data.success) {
+        // Fallback check: If the backend fails due to prototype mapping issues, 
+        // provide a clean, context-sensitive message to the user.
+        const friendlyMessage = data.message === 'An unexpected error occurred.'
+          ? 'Invalid credentials. Please verify your email and password.'
+          : (data.message || 'Authentication failed. Please check your credentials.');
+          
+        throw new Error(friendlyMessage);
+      }
+
+      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      onLogin(data.accessToken, data.user);
+    } catch (err: any) {
+      setError(err.message || 'Connection failed. Please check if your server is running.');
+    } finally {
       setIsLoading(false);
-      onLogin();
-    }, 800);
+    }
   };
 
   return (
     <div className="min-h-screen w-full bg-[#F8FAFC] flex items-center justify-center p-4 lg:p-8 font-sans selection:bg-[#2563EB] selection:text-white">
       <div className="w-full max-w-6xl rounded-3xl overflow-hidden shadow-2xl border border-slate-200/80 grid grid-cols-1 lg:grid-cols-12 min-h-[720px] bg-white">
         
-        {/* Left Panel: Brand & Illustration (Sleek Interface Gradient & Globe) */}
+        {/* Left Panel: Brand & Illustration */}
         <div className="lg:col-span-7 bg-gradient-to-br from-[#2563EB] via-[#1E40AF] to-[#172554] p-8 lg:p-14 text-white relative flex flex-col justify-between overflow-hidden">
-          {/* Abstract Background Elements */}
           <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-blue-400 opacity-20 rounded-full blur-3xl pointer-events-none" />
           <div className="absolute bottom-[-5%] left-[-5%] w-80 h-80 bg-blue-300 opacity-10 rounded-full blur-3xl pointer-events-none" />
           
-          {/* Top Brand Mark */}
           <div className="relative z-10 flex items-center gap-3">
             <div className="w-10 h-10 bg-[#2563EB] rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/30 border border-white/20">
               <span className="text-white font-black text-xl font-mono">W</span>
@@ -43,11 +77,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
             </div>
           </div>
 
-          {/* Central Globe & Floating Cards Illustration */}
           <div className="relative z-10 my-8 flex flex-col items-center justify-center text-center">
-            
             <div className="relative w-64 h-64 sm:w-72 sm:h-72 flex items-center justify-center mb-8">
-              {/* Globe Outer Concentric Rings */}
               <div className="w-72 h-72 border border-white/20 rounded-full flex items-center justify-center">
                 <div className="w-56 h-56 border border-white/30 rounded-full flex items-center justify-center">
                   <div className="w-40 h-40 border-2 border-white/40 rounded-full flex items-center justify-center relative">
@@ -58,7 +89,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
                 </div>
               </div>
               
-              {/* Floating Credit Card 1 */}
               <div className="absolute top-4 -right-6 w-48 h-32 bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-4 shadow-2xl transform -rotate-12 hover:rotate-0 transition-all duration-300">
                 <div className="w-10 h-6 bg-yellow-400/80 rounded-sm mb-6 flex items-center justify-center">
                   <CreditCard className="w-4 h-4 text-slate-900" />
@@ -69,7 +99,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
                 </div>
               </div>
               
-              {/* Floating Credit Card 2 */}
               <div className="absolute bottom-4 -left-8 w-48 h-32 bg-gradient-to-tr from-white/20 to-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-4 shadow-2xl transform rotate-6 hover:rotate-0 transition-all duration-300">
                 <div className="flex justify-between items-start">
                   <div className="w-8 h-8 bg-blue-400/40 rounded-full flex items-center justify-center">
@@ -82,33 +111,21 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
             </div>
 
             <div className="max-w-md">
-              <h1 className="text-3xl lg:text-4xl font-bold tracking-tight mb-3 leading-tight text-white">
+              <h1 className="text-3xl lg:text-2xl font-bold tracking-tight mb-3 leading-tight text-white">
                 Global Transfers<br />Simplified.
               </h1>
-              <p className="text-blue-100 text-sm max-w-sm mx-auto leading-relaxed">
-                Transfer money internationally in minutes with the world's most trusted fintech platform.
-              </p>
             </div>
           </div>
 
-          {/* Connections Overlay Lines */}
           <div className="absolute inset-0 opacity-20 pointer-events-none">
             <svg width="100%" height="100%" className="stroke-white fill-none">
               <path d="M100 200 Q 300 100 500 200" strokeDasharray="5,5" />
               <path d="M150 500 Q 400 350 600 450" strokeDasharray="5,5" />
             </svg>
           </div>
-
-          {/* Bottom Security Footer */}
-          <div className="relative z-10 flex items-center justify-between text-xs text-blue-200/70 border-t border-white/10 pt-4">
-            <span className="flex items-center gap-1.5">
-              <Shield className="w-4 h-4 text-emerald-400" /> FCA Regulated & Bank-Grade 256-Bit SSL
-            </span>
-            <span className="font-mono text-[11px]">v3.8.0 PROD</span>
-          </div>
         </div>
 
-        {/* Right Panel: Login Form (Sleek Interface Styling) */}
+        {/* Right Panel: Login Form */}
         <div className="lg:col-span-5 bg-white p-8 lg:p-12 flex flex-col justify-center relative">
           <div className="w-full max-w-md mx-auto">
             
@@ -123,6 +140,13 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
               <p className="text-slate-500 text-sm">Please enter your details to sign in</p>
             </div>
 
+            {/* Error Banner */}
+            {error && (
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-600 font-medium">
+                <span className="font-bold"></span> {error}
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-2">
@@ -135,7 +159,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    placeholder="name@company.com"
+                    placeholder="mugenzi@gmail.com"
                     className="w-full h-14 bg-slate-100 border-2 border-transparent focus:border-[#2563EB] focus:bg-white rounded-2xl pl-12 pr-5 transition-all outline-none text-slate-900 placeholder:text-slate-400 text-sm font-medium"
                   />
                 </div>
@@ -144,13 +168,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
               <div>
                 <div className="flex justify-between items-center mb-2">
                   <label className="text-sm font-semibold text-slate-700">Password</label>
-                  <a
-                    href="#forgot"
-                    onClick={(e) => e.preventDefault()}
-                    className="text-sm font-semibold text-[#2563EB] hover:underline"
-                  >
-                    Forgot?
-                  </a>
                 </div>
                 <div className="relative">
                   <Lock className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -163,18 +180,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
                     className="w-full h-14 bg-slate-100 border-2 border-transparent focus:border-[#2563EB] focus:bg-white rounded-2xl pl-12 pr-5 transition-all outline-none text-slate-900 text-sm font-medium"
                   />
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  id="remember"
-                  defaultChecked
-                  className="w-5 h-5 rounded-lg accent-[#2563EB] border-slate-300 cursor-pointer"
-                />
-                <label htmlFor="remember" className="text-sm text-slate-600 cursor-pointer select-none">
-                  Remember for 30 days
-                </label>
               </div>
 
               <button
@@ -205,13 +210,6 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
             >
               Create Account
             </button>
-
-            <p className="mt-8 text-center text-sm text-slate-500">
-              Don't have an account?{' '}
-              <span onClick={onNavigateToSignup} className="text-[#2563EB] font-bold cursor-pointer hover:underline">
-                Get Started
-              </span>
-            </p>
           </div>
         </div>
 
@@ -219,4 +217,3 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
     </div>
   );
 };
-

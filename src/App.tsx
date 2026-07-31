@@ -142,7 +142,7 @@ export default function App() {
           {activeTab === 'new_transfer' && (
             <NewTransferPage
               prefilledSendAmount={prefilledSendAmount}
-              prefilledFromCode={prefilledFromCode}
+            
               prefilledToCode={prefilledToCode}
               onTransferCompleted={handleTransferCompleted}
               onCancel={() => setActiveTab('dashboard')}
