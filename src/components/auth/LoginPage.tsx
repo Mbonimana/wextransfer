@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Mail, Lock, ArrowRight, Shield, Globe, CreditCard, Send } from 'lucide-react';
-import { API_BASE_URL } from '@/src/config/api';
+import { API_BASE_URL } from '../../config/api';
 
 interface LoginPageProps {
   onLogin: (accessToken?: string, user?: { id: string; fullName: string; email: string; role: string }) => void;
@@ -143,7 +143,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLogin, onNavigateToSignu
             {/* Error Banner */}
             {error && (
               <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-600 font-medium">
-                <span className="font-bold"></span> {error}
+                <span className="font-bold">Error:</span> {error}
               </div>
             )}
 
