@@ -1,25 +1,68 @@
 import React, { useState } from 'react';
 import { Mail, Lock, User, ArrowRight, ShieldCheck, Globe, CreditCard, Send } from 'lucide-react';
+import { API_BASE_URL } from '@/src/config/api';
 
 interface SignupPageProps {
-  onSignup: () => void;
+  onSignup: (accessToken?: string, user?: { id: string; fullName: string; email: string; role: string }) => void;
   onNavigateToLogin: () => void;
 }
 
 export const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onNavigateToLogin }) => {
-  const [fullName, setFullName] = useState('Alex Morgan');
-  const [email, setEmail] = useState('alex.morgan@wextransfer.com');
-  const [password, setPassword] = useState('••••••••••••');
-  const [confirmPassword, setConfirmPassword] = useState('••••••••••••');
+  const [fullName, setFullName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoading(true);
-    setTimeout(() => {
+    setError(null);
+
+    // Password matching validation
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
       setIsLoading(false);
-      onSignup();
-    }, 800);
+      return;
+    }
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ fullName, email, password }),
+      });
+
+      let data: any;
+      try {
+        data = await response.json();
+      } catch (jsonParseError) {
+        throw new Error('The server returned an invalid response. Please verify the backend is active.');
+      }
+
+      if (!response.ok || !data.success) {
+        // Retrieve nested validation messages from Zod if present
+        if (data.errors && Array.isArray(data.errors)) {
+          const firstError = data.errors[0];
+          throw new Error(`${firstError.path}: ${firstError.message}`);
+        }
+        throw new Error(data.message || 'Registration failed. Please check your details.');
+      }
+
+      // Securely cache session variables
+      localStorage.setItem('accessToken', data.accessToken);
+      localStorage.setItem('refreshToken', data.refreshToken);
+      localStorage.setItem('user', JSON.stringify(data.user));
+
+      onSignup(data.accessToken, data.user);
+    } catch (err: any) {
+      setError(err.message || 'Connection failed. Please check if your server is running.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   return (
@@ -70,9 +113,9 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onNavigateToLo
 
           <div className="relative z-10 border-t border-white/10 pt-4 flex items-center justify-between text-xs text-blue-200/70">
             <span className="flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" /> FCA Regulated & Bank-Grade
+              <ShieldCheck className="w-4 h-4 text-emerald-400" /> 
             </span>
-            <span className="font-mono text-[11px]">2.4M Users</span>
+            <span className="font-mono text-[11px]"></span>
           </div>
         </div>
 
@@ -91,10 +134,17 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onNavigateToLo
               <p className="text-slate-500 text-sm">Start sending money internationally in under 2 minutes.</p>
             </div>
 
+            {/* Error Banner */}
+            {error && (
+              <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-2xl text-xs text-red-600 font-medium">
+                <span className="font-bold">Error:</span> {error}
+              </div>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-slate-700 mb-1.5">
-                  Full Legal Name
+                  Full  Name
                 </label>
                 <div className="relative">
                   <User className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -103,7 +153,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onNavigateToLo
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
                     required
-                    placeholder="e.g. Alex Morgan"
+                    placeholder="Mugenzi Ber"
                     className="w-full h-13 bg-slate-100 border-2 border-transparent focus:border-[#2563EB] focus:bg-white rounded-2xl pl-12 pr-4 transition-all outline-none text-slate-900 text-sm font-medium"
                   />
                 </div>
@@ -120,7 +170,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onNavigateToLo
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
-                    placeholder="alex.morgan@company.com"
+                    placeholder="mugenziber@gmail.com"
                     className="w-full h-13 bg-slate-100 border-2 border-transparent focus:border-[#2563EB] focus:bg-white rounded-2xl pl-12 pr-4 transition-all outline-none text-slate-900 text-sm font-medium"
                   />
                 </div>
@@ -162,18 +212,7 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onNavigateToLo
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 pt-2">
-                <input
-                  type="checkbox"
-                  id="terms"
-                  required
-                  defaultChecked
-                  className="w-5 h-5 rounded-lg accent-[#2563EB] border-slate-300 cursor-pointer"
-                />
-                <label htmlFor="terms" className="text-sm text-slate-600 cursor-pointer">
-                  I agree to the <a href="#terms" className="text-[#2563EB] font-bold hover:underline">Terms of Service</a> & <a href="#privacy" className="text-[#2563EB] font-bold hover:underline">Privacy Policy</a>
-                </label>
-              </div>
+             
 
               <button
                 type="submit"
@@ -207,4 +246,3 @@ export const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onNavigateToLo
     </div>
   );
 };
-
