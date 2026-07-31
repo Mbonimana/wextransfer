@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Send, LayoutDashboard, ArrowRightLeft, History, CreditCard, Settings, LogOut, ShieldCheck, UserCheck, ChevronRight } from 'lucide-react';
 import { UserRole } from '../../types';
 
@@ -15,6 +15,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   currentRole,
   onLogout,
 }) => {
+  // Dynamically resolve authenticated user details from local storage cache
+  const [userProfile] = useState<{ fullName: string; email: string } | null>(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('user');
+      if (cached) {
+        try {
+          return JSON.parse(cached);
+        } catch (e) {
+          console.error('Failed to parse cached user details inside Sidebar', e);
+        }
+      }
+    }
+    return null;
+  });
+
   const getNavItems = () => {
     if (currentRole === 'agent') {
       return [
@@ -48,6 +63,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   const navItems = getNavItems();
 
+  const userFullName = userProfile?.fullName || 'Guest User';
+  const userEmail = userProfile?.email || 'guest@wextransfer.com';
+
   return (
     <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col justify-between p-4 border-r border-slate-800 shrink-0 min-h-screen select-none">
       {/* Brand & Logo */}
@@ -80,7 +98,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 onClick={() => onTabChange(item.id)}
-                className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-sm font-semibold transition-all cursor-pointer ${
+                className={`w-full flex items-center justify-between px-3.5 py-3 rounded-2xl text-sm font-semibold transition-all cursor-pointer border-none ${
                   isActive
                     ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
@@ -102,18 +120,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <div className="bg-slate-800/50 rounded-2xl p-3 mb-3 flex items-center gap-3 border border-slate-700/50">
           <img
             src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
-            alt="Alex Morgan"
+            alt={userFullName}
             className="w-9 h-9 rounded-full object-cover border border-blue-400/40"
           />
           <div className="overflow-hidden">
-            <p className="text-xs font-bold text-white truncate">Alex Morgan</p>
-            <p className="text-[11px] text-slate-400 truncate">alex.morgan@wextransfer.com</p>
+            <p className="text-xs font-bold text-white truncate">{userFullName}</p>
+            <p className="text-[11px] text-slate-400 truncate">{userEmail}</p>
           </div>
         </div>
 
         <button
           onClick={onLogout}
-          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer"
+          className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-2xl text-xs font-bold text-rose-400 hover:bg-rose-500/10 transition-all cursor-pointer border-none bg-transparent"
         >
           <LogOut className="w-4 h-4" />
           <span>Logout Session</span>

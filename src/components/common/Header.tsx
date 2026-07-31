@@ -136,13 +136,7 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* User Profile Avatar */}
-        <div className="flex items-center gap-2 pl-2 border-l border-slate-200">
-          <img
-            src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80"
-            alt="Alex Morgan"
-            className="w-9 h-9 rounded-2xl object-cover ring-2 ring-blue-500/30"
-          />
-        </div>
+     
 
       </div>
     </header>
