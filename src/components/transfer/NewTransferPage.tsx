@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Currency, Recipient, Transaction } from '../../types';
 import { SUPPORTED_CURRENCIES } from '../../data/mockData';
-import { Send, CheckCircle2, CreditCard, User, Globe, ArrowRight, ShieldCheck, Zap, Lock, Clock, FileText, Download, ChevronRight } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
+import { Send, CheckCircle2, CreditCard, Globe, ArrowRight, ShieldCheck, Zap, Lock, Clock, Download } from 'lucide-react';
 
 interface NewTransferPageProps {
   prefilledSendAmount?: number;
@@ -50,8 +51,21 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
   const [bankName] = useState('BNP Paribas');
   const [accountNumber] = useState('FR76 3000 4012 3456 7890 123');
 
-  // Step 2: Payment Details State
-  const [cardHolder, setCardHolder] = useState('Alex Morgan');
+  // Step 2: Payment Details State (Dynamic resolution from session name fallback)
+  const [cardHolder, setCardHolder] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('user');
+      if (cached) {
+        try {
+          return JSON.parse(cached).fullName;
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+    return 'Alex Morgan';
+  });
+  
   const [cardNumber, setCardNumber] = useState('');
   const [cardError, setCardError] = useState('');
   const [expiry, setExpiry] = useState('');
@@ -60,6 +74,7 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
   // Final Generated Transaction Result
   const [completedTx, setCompletedTx] = useState<Transaction | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   // Dynamic calculations
   const feeUSD = 1.50;
@@ -131,49 +146,92 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
     setCurrentStep(3);
   };
 
-  const handleFinalSubmit = () => {
+  const handleFinalSubmit = async () => {
     setIsSubmitting(true);
-    setTimeout(() => {
-      const generatedReference = `WX-${Math.floor(1000 + Math.random() * 9000)}-${Math.floor(1000 + Math.random() * 9000)}`;
-      const cardUsed = `Mastercard •••• ${cardNumber.slice(-4)}`;
+    setApiError(null);
 
-      const createdTx: Transaction = {
-        id: `tx-${Date.now()}`,
-        reference: generatedReference,
-        senderName: 'Alex Morgan',
+    try {
+      const token = localStorage.getItem('accessToken');
+      if (!token) throw new Error('Authorization token not found.');
+
+      // Compile data payload sending CVV as both standard "cvv" and backend "cardCvv" to guarantee mapping
+      const payload = {
+        amount: sendAmount,
+        currency: 'USD',
+        saveCard: false,
+        card: {
+          cardHolderName: cardHolder,
+          cardNumber: cardNumber.replace(/\s+/g, ''),
+          expiryDate: expiry,
+          cvv: cvv,       // Standard naming
+          cardCvv: cvv,   // Database/Prisma schema naming
+        },
         recipient: {
-          id: `rec-${Date.now()}`,
           name: recipientName,
-          email: `${recipientName.toLowerCase().replace(' ', '.')}@email.com`,
+          email: `${recipientName.toLowerCase().replace(/\s+/g, '.')}@email.com`,
           phone: phoneNumber,
           country: country,
-          countryCode: 'FR',
           bankName: bankName,
           accountNumber: accountNumber,
         },
-        sendAmount: sendAmount,
-        sendCurrency: fromCurrency.code,
-        receiveAmount: recipientAmount,
-        receiveCurrency: toCurrency.code,
-        exchangeRate: liveExchangeRate,
-        fee: feeUSD,
-        status: 'processing',
-        date: new Date().toISOString(),
-        paymentMethod: cardUsed,
-        purpose: 'International Family Transfer',
-        timeline: [
-          { id: '1', title: 'Transfer Initiated', description: `Payment of $${sendAmount.toFixed(2)} confirmed from ${cardUsed}`, timestamp: 'Just now', status: 'done', icon: 'send' },
-          { id: '2', title: 'Compliance & AML Verification', description: 'Automated global sanctions screening passed', timestamp: 'Just now', status: 'done', icon: 'shield' },
-          { id: '3', title: 'Processing Payout', description: `Converting at 1 ${fromCurrency.code} = ${liveExchangeRate.toFixed(4)} ${toCurrency.code}`, timestamp: 'In progress', status: 'active', icon: 'refresh' },
-          { id: '4', title: 'Money Landed', description: `Awaiting payout deposit into ${bankName}`, timestamp: 'Est. 2 mins', status: 'upcoming', icon: 'check' },
-        ],
       };
 
-      setCompletedTx(createdTx);
-      setIsSubmitting(false);
+      const response = await fetch(`${API_BASE_URL}/customer/transfers`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        if (data.errors && Array.isArray(data.errors)) {
+          const firstErr = data.errors[0];
+          throw new Error(`Validation Error: ${firstErr.path} - ${firstErr.message}`);
+        }
+        throw new Error(data.message || 'Transfer failed. Please check your banking connection.');
+      }
+
+      // Map dynamic backend response details safely to local state
+      const backendTx = data.data;
+      const parsedTx: Transaction = {
+        id: backendTx.id,
+        reference: backendTx.reference || `WX-${backendTx.id.substring(0, 8).toUpperCase()}`,
+        senderName: backendTx.details?.senderName || cardHolder,
+        recipient: {
+          id: backendTx.recipient?.id || `rec-${Date.now()}`,
+          name: backendTx.recipient?.name || recipientName,
+          email: backendTx.recipient?.email || `${recipientName.toLowerCase().replace(/\s+/g, '.')}@email.com`,
+          phone: backendTx.recipient?.phone || phoneNumber,
+          country: backendTx.recipient?.country || country,
+          bankName: backendTx.recipient?.bankName || bankName,
+          accountNumber: backendTx.recipient?.accountNumber || accountNumber,
+          countryCode: ''
+        },
+        sendAmount: backendTx.amount || sendAmount,
+        sendCurrency: backendTx.currency || 'USD',
+        receiveAmount: backendTx.receiveAmount || recipientAmount,
+        receiveCurrency: toCurrency.code,
+        exchangeRate: backendTx.exchangeRate || liveExchangeRate,
+        fee: backendTx.fee || feeUSD,
+        status: (backendTx.status?.toLowerCase() as any) || 'processing',
+        date: backendTx.createdAt || new Date().toISOString(),
+        paymentMethod: `Mastercard •••• ${cardNumber.slice(-4)}`,
+        purpose: '',
+        timeline: []
+      };
+
+      setCompletedTx(parsedTx);
       setCurrentStep(4);
-      onTransferCompleted(createdTx);
-    }, 1200);
+      onTransferCompleted(parsedTx);
+    } catch (err: any) {
+      setApiError(err.message || 'Connection lost. Please verify your backend server status.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -247,7 +305,7 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
             <form onSubmit={handleStep1Submit} className="space-y-6">
               <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
                 <Globe className="w-5 h-5 text-blue-600" />
-                Step 1: Specify Amount
+                Amount To send
               </h2>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -319,12 +377,12 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
             <form onSubmit={handleStep2Submit} className="space-y-6">
               <h2 className="text-lg font-bold text-slate-900 tracking-tight flex items-center gap-2">
                 <CreditCard className="w-5 h-5 text-blue-600" />
-                Step 2: Mastercard Payment details
+                Card Details
               </h2>
 
               <div className="space-y-4 pt-2">
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 uppercase tracking-wider mb-1.5">
+                  <label className="block text-sm font-semibold text-slate-700 mb-1.5">
                     Card Holder Name
                   </label>
                   <input
@@ -417,6 +475,12 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
                 Step 3: Review & Authorize
               </h2>
 
+              {apiError && (
+                <div className="p-4 bg-red-50 border border-red-200 text-xs text-red-600 font-medium rounded-2xl">
+                  <span className="font-bold">Error:</span> {apiError}
+                </div>
+              )}
+
               <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200 space-y-3">
                 <div className="flex items-center justify-between text-xs pb-2 border-b border-slate-200">
                   <span className="text-slate-500 font-medium">Recipient Name:</span>
@@ -449,14 +513,14 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
               <div className="pt-4 flex items-center justify-between">
                 <button
                   onClick={() => setCurrentStep(2)}
-                  className="py-3 px-5 text-slate-600 hover:text-slate-900 font-semibold text-xs cursor-pointer"
+                  className="py-3 px-5 text-slate-600 hover:text-slate-900 font-semibold text-xs cursor-pointer font-bold border-none bg-transparent"
                 >
                   ← Edit Payment
                 </button>
                 <button
                   onClick={handleFinalSubmit}
                   disabled={isSubmitting}
-                  className="py-4 px-8 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-blue-600/30 transition-all flex items-center gap-2 cursor-pointer disabled:opacity-70"
+                  className="py-4 px-8 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-extrabold text-sm rounded-2xl shadow-xl shadow-blue-600/30 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-70 border-none"
                 >
                   {isSubmitting ? (
                     <span className="inline-block w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
@@ -514,13 +578,13 @@ export const NewTransferPage: React.FC<NewTransferPageProps> = ({
               <div className="flex flex-col sm:flex-row items-center justify-center gap-3 pt-2">
                 <button
                   onClick={() => alert(`Receipt downloaded for ${completedTx.reference}`)}
-                  className="py-3 px-5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer w-full sm:w-auto justify-center"
+                  className="py-3 px-5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-2xl flex items-center gap-2 cursor-pointer w-full sm:w-auto justify-center border-none"
                 >
                   <Download className="w-4 h-4" /> Download PDF Receipt
                 </button>
                 <button
                   onClick={onCancel}
-                  className="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-2xl shadow-md cursor-pointer w-full sm:w-auto justify-center"
+                  className="py-3 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-2xl shadow-md cursor-pointer w-full sm:w-auto justify-center border-none"
                 >
                   Return to Dashboard
                 </button>
