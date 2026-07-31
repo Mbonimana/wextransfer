@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Transaction, Currency } from '../../types';
 import { StatusBadge } from '../common/StatusBadge';
 import { SUPPORTED_CURRENCIES } from '../../data/mockData';
-import { ArrowUpRight, ArrowRight, ShieldCheck, Zap, Layers, RefreshCw, Send, ChevronRight, Inbox, Sparkles, Clock } from 'lucide-react';
+import { API_BASE_URL } from '../../config/api';
+import { ArrowUpRight, ArrowRight, ShieldCheck, Zap, Send, ChevronRight, Inbox, Sparkles, Clock } from 'lucide-react';
 
 interface UserDashboardProps {
   transactions: Transaction[];
@@ -22,24 +23,97 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
   const [calcFrom, setCalcFrom] = useState<Currency>(SUPPORTED_CURRENCIES[0]); // USD
   const [calcTo, setCalcTo] = useState<Currency>(SUPPORTED_CURRENCIES[1]); // EUR
 
-  // Calculate live FX output
+  // Local user resolution from cached session
+  const [userName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const cached = localStorage.getItem('user');
+      if (cached) {
+        try {
+          return JSON.parse(cached).fullName.split(' ')[0];
+        } catch (e) {
+          console.error(e);
+        }
+      }
+    }
+    return 'Alex';
+  });
+
+  // Dynamic API State
+  const [liveMetrics, setLiveMetrics] = useState<{
+    totalSent: number;
+    completedTransfers: number;
+    pendingTransfers: number;
+    refundedTransfers: number;
+    recentTransfers: any[];
+  } | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [apiError, setApiError] = useState<string | null>(null);
+
+  // Load backend metrics on mount
+  useEffect(() => {
+    const fetchMetrics = async () => {
+      setIsLoading(true);
+      setApiError(null);
+      try {
+        const token = localStorage.getItem('accessToken');
+        if (!token) throw new Error('Session token not found.');
+
+        const response = await fetch(`${API_BASE_URL}/customer/dashboard`, {
+          method: 'GET',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+
+        const data = await response.json();
+        if (!response.ok || !data.success) {
+          throw new Error(data.message || 'Failed to fetch dashboard metrics.');
+        }
+
+        setLiveMetrics(data);
+      } catch (err: any) {
+        setApiError(err.message || 'Failed to connect to the backend server.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchMetrics();
+  }, []);
+
+  // Updated adapter mapping function as requested (with recipient properties removed)
+  const parseBackendTransaction = (tx: any): any => {
+    const reference = tx.reference || `WX-${tx.id.substring(0, 8).toUpperCase()}`;
+    return {
+      id: tx.id,
+      reference,
+      sendAmount: tx.amount,
+      sendCurrency: tx.currency || 'USD',
+      receiveAmount: tx.receiveAmount || tx.amount * 0.92, 
+      receiveCurrency: tx.receiveCurrency || 'EUR',
+      status: tx.status?.toLowerCase() as any, 
+      date: tx.createdAt || tx.date,
+    };
+  };
+
+  // Calculator logic
   const fromRate = calcFrom.rateToUSD;
   const toRate = calcTo.rateToUSD;
-  const rawConverted = (calcAmount / fromRate) * toRate;
   const feeUSD = 1.50;
   const netSendAmount = Math.max(0, calcAmount - feeUSD);
   const netConverted = (netSendAmount / fromRate) * toRate;
   const liveRate = (1 / fromRate) * toRate;
 
-  // KPI Calculations
-  const completedCount = transactions.filter((t) => t.status === 'completed').length;
-  const pendingCount = transactions.filter((t) => t.status === 'pending' || t.status === 'processing').length;
-  const refundedCount = transactions.filter((t) => t.status === 'refunded').length;
-  const totalVolumeUSD = transactions
-    .filter((t) => t.status === 'completed')
-    .reduce((sum, t) => sum + t.sendAmount, 0);
-
-  const recentTransactions = transactions.slice(0, 5);
+  // KPIs
+  const totalVolumeUSD = liveMetrics ? liveMetrics.totalSent : transactions.filter((t) => t.status === 'completed').reduce((sum, t) => sum + t.sendAmount, 0);
+  const completedCount = liveMetrics ? liveMetrics.completedTransfers : transactions.filter((t) => t.status === 'completed').length;
+  const pendingCount = liveMetrics ? liveMetrics.pendingTransfers : transactions.filter((t) => t.status === 'pending' || t.status === 'processing').length;
+  const refundedCount = liveMetrics ? liveMetrics.refundedTransfers : transactions.filter((t) => t.status === 'refunded').length;
+  
+  const displayTransactions = liveMetrics 
+    ? liveMetrics.recentTransfers.map(parseBackendTransaction)
+    : transactions.slice(0, 5);
 
   return (
     <div className="space-y-8 p-6 max-w-7xl mx-auto font-sans">
@@ -51,7 +125,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/30 text-blue-200 text-xs font-semibold backdrop-blur-md mb-2 border border-blue-400/30">
             <Sparkles className="w-3.5 h-3.5 text-amber-300" /> Verified Premium Account
           </div>
-          <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight">Good day, Alex 👋</h1>
+          <h1 className="text-2xl lg:text-3xl font-extrabold tracking-tight">Good day, {userName} 👋</h1>
           <p className="text-sm text-blue-200/80 max-w-lg">
             Guaranteed mid-market FX rates locked for your international transfers today.
           </p>
@@ -60,7 +134,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         <div className="relative z-10 flex items-center gap-3">
           <button
             onClick={() => onNewTransferWithData && onNewTransferWithData(calcAmount, calcFrom.code, calcTo.code)}
-            className="py-3 px-6 bg-white hover:bg-blue-50 text-blue-900 font-bold text-sm rounded-2xl shadow-lg transition-all flex items-center gap-2 cursor-pointer"
+            className="py-3 px-6 bg-white hover:bg-blue-50 text-blue-900 font-bold text-sm rounded-2xl shadow-lg transition-all flex items-center gap-2 cursor-pointer border-none"
           >
             <Send className="w-4 h-4 text-blue-600" />
             <span>Send Money Now</span>
@@ -68,11 +142,18 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         </div>
       </div>
 
+      {/* API Connection Warning (Non-blocking) */}
+      {apiError && (
+        <div className="p-4 bg-amber-50 border border-amber-200 text-xs text-amber-800 font-medium rounded-2xl">
+          <span className="font-bold">Notice:</span> {apiError} Displaying local mock session records instead.
+        </div>
+      )}
+
       {/* KPI Dashboard Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         
-        {/* Total Transfers Card */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all relative overflow-hidden group">
+        {/* Total Volume Card */}
+        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all relative overflow-hidden">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Total Volume</span>
             <div className="w-10 h-10 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
@@ -80,9 +161,13 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             </div>
           </div>
           <div className="mt-4">
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">
-              ${totalVolumeUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}
-            </h3>
+            {isLoading ? (
+              <div className="h-8 w-28 bg-slate-100 animate-pulse rounded-md" />
+            ) : (
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">
+                ${totalVolumeUSD.toLocaleString('en-US', { minimumFractionDigits: 2 })}
+              </h3>
+            )}
             <p className="text-xs font-semibold text-emerald-600 mt-1 flex items-center gap-1">
               <ArrowUpRight className="w-3.5 h-3.5" /> +14.2% vs last month
             </p>
@@ -90,7 +175,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
         </div>
 
         {/* Completed Card */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all">
+        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Completed</span>
             <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
@@ -98,13 +183,17 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             </div>
           </div>
           <div className="mt-4">
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">{completedCount}</h3>
+            {isLoading ? (
+              <div className="h-8 w-16 bg-slate-100 animate-pulse rounded-md" />
+            ) : (
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">{completedCount}</h3>
+            )}
             <p className="text-xs text-slate-500 mt-1">Successful global deliveries</p>
           </div>
         </div>
 
         {/* Pending Card */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all">
+        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pending</span>
             <div className="w-10 h-10 rounded-2xl bg-amber-50 text-amber-600 flex items-center justify-center font-bold">
@@ -112,13 +201,17 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             </div>
           </div>
           <div className="mt-4">
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">{pendingCount}</h3>
+            {isLoading ? (
+              <div className="h-8 w-16 bg-slate-100 animate-pulse rounded-md" />
+            ) : (
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">{pendingCount}</h3>
+            )}
             <p className="text-xs text-amber-600 font-medium mt-1">In transit via instant gateway</p>
           </div>
         </div>
 
         {/* Refunded Card */}
-        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm hover:shadow-md transition-all">
+        <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm transition-all">
           <div className="flex items-center justify-between">
             <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Refunded</span>
             <div className="w-10 h-10 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
@@ -126,14 +219,18 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
             </div>
           </div>
           <div className="mt-4">
-            <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">{refundedCount}</h3>
+            {isLoading ? (
+              <div className="h-8 w-16 bg-slate-100 animate-pulse rounded-md" />
+            ) : (
+              <h3 className="text-2xl font-black text-slate-900 tracking-tight font-mono">{refundedCount}</h3>
+            )}
             <p className="text-xs text-slate-500 mt-1">Returned to card source</p>
           </div>
         </div>
 
       </div>
 
-      {/* Main Grid: Live Rate Calculator + Fast Actions */}
+      {/* Main Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* Instant FX Exchange Calculator Widget */}
@@ -217,7 +314,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
 
             <button
               onClick={() => onNewTransferWithData && onNewTransferWithData(calcAmount, calcFrom.code, calcTo.code)}
-              className="w-full py-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm rounded-2xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full py-4 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white font-bold text-sm rounded-2xl shadow-lg shadow-blue-600/25 transition-all flex items-center justify-center gap-2 cursor-pointer border-none"
             >
               <span>Continue with {calcFrom.code} ➔ {calcTo.code}</span>
               <ArrowRight className="w-4 h-4" />
@@ -268,14 +365,20 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
           </div>
           <button
             onClick={onNavigateToTransactions}
-            className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+            className="text-xs font-bold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer bg-transparent border-none"
           >
             <span>View All ({transactions.length})</span>
             <ChevronRight className="w-4 h-4" />
           </button>
         </div>
 
-        {recentTransactions.length === 0 ? (
+        {isLoading ? (
+          <div className="space-y-4 py-4">
+            <div className="h-10 w-full bg-slate-50 animate-pulse rounded-xl" />
+            <div className="h-10 w-full bg-slate-50 animate-pulse rounded-xl" />
+            <div className="h-10 w-full bg-slate-50 animate-pulse rounded-xl" />
+          </div>
+        ) : displayTransactions.length === 0 ? (
           <div className="py-12 text-center text-slate-400 space-y-3">
             <Inbox className="w-10 h-10 mx-auto text-slate-300" />
             <p className="text-sm font-semibold text-slate-600">No transactions recorded yet</p>
@@ -287,8 +390,6 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
               <thead>
                 <tr className="border-b border-slate-100 text-slate-400 uppercase tracking-wider font-semibold">
                   <th className="pb-3 px-3">Reference</th>
-                  <th className="pb-3 px-3">Recipient</th>
-                  <th className="pb-3 px-3">Country</th>
                   <th className="pb-3 px-3 text-right">Amount Sent</th>
                   <th className="pb-3 px-3 text-right">Recipient Gets</th>
                   <th className="pb-3 px-3 text-center">Status</th>
@@ -296,7 +397,7 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {recentTransactions.map((tx) => (
+                {displayTransactions.map((tx: any) => (
                   <tr
                     key={tx.id}
                     onClick={() => onSelectTransaction(tx)}
@@ -304,22 +405,6 @@ export const UserDashboard: React.FC<UserDashboardProps> = ({
                   >
                     <td className="py-4 px-3 font-mono font-bold text-blue-600 group-hover:underline">
                       {tx.reference}
-                    </td>
-                    <td className="py-4 px-3">
-                      <div className="flex items-center gap-2.5">
-                        <img
-                          src={tx.recipient.avatarUrl || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=150&q=80'}
-                          alt={tx.recipient.name}
-                          className="w-8 h-8 rounded-full object-cover border border-slate-200"
-                        />
-                        <div>
-                          <p className="font-bold text-slate-900">{tx.recipient.name}</p>
-                          <p className="text-[10px] text-slate-400">{tx.recipient.bankName || tx.recipient.mobileWalletProvider || 'Bank Transfer'}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="py-4 px-3 font-semibold text-slate-700">
-                      {tx.recipient.country}
                     </td>
                     <td className="py-4 px-3 text-right font-mono font-bold text-slate-900">
                       ${tx.sendAmount.toFixed(2)} {tx.sendCurrency}
