@@ -1,0 +1,6 @@
+{
+  "name": "WeXTransfer",
+  "description": "Next-generation international money transfer platform with multi-role dashboards, instant FX calculator, saved cards wallet, and real-time transaction tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
